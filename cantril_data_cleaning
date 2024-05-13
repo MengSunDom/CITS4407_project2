@@ -1,25 +1,24 @@
 #!/bin/bash
 
-# 输入校验
-if [ "$#" -ne 4 ]; then
-    echo "Usage: $0 <input_file1.tsv> <input_file2.tsv> <input_file3.tsv> <output_file.tsv>"
+# Input validation 
+if [ "$#" -ne 3 ]; then
+    echo "Usage: $0 <input_file1.tsv> <input_file2.tsv> <input_file3.tsv>"
     exit 1
 fi
 
 input_file1="$1"
 input_file2="$2"
 input_file3="$3"
-output_file="$4"
 
-# 检查输入文件是否存在
-for file in "$input_file1" "$input_file2" "$input_file3"; do
+# Check if the file exist
+for file in "$1" "$2" "$3"; do
     if [ ! -f "$file" ]; then
         echo "Input file $file does not exist."
         exit 1
     fi
 done
 
-# 检查文件类型是否为TSV
+# Check the file type
 check_file_type() {
     first_line=$(head -n 1 "$1")
     if [[ "$first_line" == *$'\t'* ]]; then
@@ -29,7 +28,7 @@ check_file_type() {
     fi
 }
 
-# 检查制表符分隔
+# Check for tab delimitation
 check_tab_separator() {
     first_line=$(head -n 1 "$1")
     if [[ "$first_line" == *$'\t'* ]]; then
@@ -39,43 +38,64 @@ check_tab_separator() {
     fi
 }
 
-# 检查单元格数不同的行，但允许单元格为空
+# Check rows with different number of cells but allow cells to be empty
 check_inconsistent_lines() {
-    for file in "$1" "$2" "$3"; do
-        num_tabs=$(head -n 1 "$file" | tr -cd '\t' | wc -c)
-        awk -F '\t' -v num_tabs="$num_tabs" 'NF != num_tabs && NF != 0' "$file" | while IFS= read -r line; do
-            echo "Inconsistent line in $file: $line"
-        done
+    for file in "$@"; do
+        awk -F '\t' 'NR == 1 { num_tabs = NF } NF != num_tabs { print "Inconsistent line in file " FILENAME " at line " NR ": " $0 }' "$file"
     done
 }
 
-# 清理文件，删除 Continent 列和空的 Code 列
+# Clean the file, remove the Continent column and the empty Code column
 clean_files() {
-    for file in "$1" "$2" "$3"; do
+    for file in "$@"; do
         awk -F '\t' 'NR==1 { for (i=1; i<=NF; i++) { if ($i == "Continent") continent_index=i; if ($i == "Code") code_index=i } } 
                      { if ($code_index != "" || NR == 1) { $continent_index=""; print } }' "$file"
     done
 }
 
-# 合并文件并根据 Year 列筛选出2011到2021年的数据
+# Function to merge three TSV files
 merge_files() {
-    awk -F '\t' 'NR==1 { for (i=1; i<=NF; i++) { if ($i == "Entity") entity_index=i; if ($i == "Code") code_index=i; if ($i == "Year") year_index=i } } 
-                 { if ($year_index >= 2011 && $year_index <= 2021) print $entity_index, $code_index, $year_index, $0 }' "$1" "$2" "$3"
+    # Get the header line from the first file
+    header=$(head -n 1 "$1")
+
+    # Output the header line
+    echo "$header"
+
+    # Merge the data from all three files
+    tail -n +2 "$@" | awk -F '\t' -v OFS='\t' '
+        # For the first file, store the values of Entity, Code, and Year in an array
+        NR == FNR {
+            entity_code_year[$1,$2,$3] = 1
+            next
+        }
+        # For subsequent files, if Entity, Code, and Year are already in the array, skip the line
+        ($1,$2,$3) in entity_code_year {
+            next
+        }
+        # If Entity, Code, and Year are not in the array, add them to the array and print the line
+        {
+            entity_code_year[$1,$2,$3] = 1
+            print
+        }
+    ' "$@"
 }
 
-# 输出首行列名
-echo -e "Entity/Country\tCode\tYear\tGDP per capita\tPopulation\tHomicide Rate\tLife Expectancy\tCantril Ladder score" > "$output_file"
+# Output the first row name
+echo -e "Entity/Country\tCode\tYear\tGDP per capita\tPopulation\tHomicide Rate\tLife Expectancy\tCantril Ladder score" > "test.tsv"
 
 # 主函数
 main() {
+    echo "1"
     check_inconsistent_lines "$input_file1" "$input_file2" "$input_file3"
-
+    echo "2"
     if ! check_tab_separator "$input_file1"; then
         echo "File $input_file1 is not tab-separated."
         exit 1
     fi
-
-    clean_files "$input_file1" "$input_file2" "$input_file3" | merge_files "$input_file1" "$input_file2" "$input_file3" >> "$output_file"
+    echo "3"
+    #clean_files "$input_file1" "$input_file2" "$input_file3" | 
+    merge_files "$input_file1" "$input_file2" "$input_file3" >> "test.tsv"
+    echo "4"
 }
 
 main
