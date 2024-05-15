@@ -1,123 +1,114 @@
 #!/bin/bash
 
 # Input validation 
-if [ "$#" -ne 3 ]; then
-    echo "Usage: $0 <input_file1.tsv> <input_file2.tsv> <input_file3.tsv>"
+if [ "$#" -ne 4 ]; then
+    echo "Usage: $0 <input_file1.tsv> <input_file2.tsv> <input_file3.tsv><output_file.tsv>"
     exit 1
 fi
 
-input_file1="$1"
-input_file2="$2"
-input_file3="$3"
-
 # Check if the file exist
-for file in "$1" "$2" "$3"; do
-    if [ ! -f "$file" ]; then
-        echo "Input file $file does not exist."
-        exit 1
-    fi
-done
-
-# Check the file type
-check_file_type() {
-    first_line=$(head -n 1 "$1")
-    if [[ "$first_line" == *$'\t'* ]]; then
-        echo "TSV"
-    else
-        echo "UNKNOWN"
-    fi
+check_file_exist() {
+    for file in "$@"; do
+        if [ ! -f "$file" ]; then
+            echo "Input file $file does not exist."
+            exit 1
+        fi
+    done
 }
 
 # Check for tab delimitation
 check_tab_separator() {
-    first_line=$(head -n 1 "$1")
-    if [[ "$first_line" == *$'\t'* ]]; then
-        return 0
-    else
-        return 1
-    fi
+    for file in "$@"; do
+        first_line=$(head -n 1 "$file")
+        if [[ "$first_line" != *$'\t'* ]]; then
+            echo "File $file is not tab-separated."
+            exit 1
+        fi
+    done
 }
 
 # Check rows with different number of cells but allow cells to be empty
 check_inconsistent_lines() {
     for file in "$@"; do
-        awk -F '\t' 'NR == 1 { num_tabs = NF } NF != num_tabs { print "Inconsistent line in file " FILENAME " at line " NR ": " $0 }' "$file"
+        first_line=$(head -n 1 "$file")
+        expected_tabs=$(echo -e "$first_line" | awk -F'\t' '{print NF}')
+        while IFS=$'\t' read -r line; do
+            num_tabs=$(echo -e "$line" | awk -F'\t' '{print NF}')
+            if [ "$num_tabs" -ne "$expected_tabs" ]; then
+                echo "Inconsistent line in file $file: $line"
+                exit 1
+            fi
+        done < "$file"
     done
 }
 
-# Function to merge three TSV files
-merge_files() {
-    headers1=$(head -n 1 "$1")
-    headers2=$(head -n 1 "$2")
-    headers3=$(head -n 1 "$3")
-
-
-    # Print the merged headers
-    echo -e "$headers1\t$headers2\t$headers3"
-
-    awk -F"\t" '
-        NR==FNR { key[$1,$2,$3]=1; lines[$1,$2,$3]=$0; next }
-        { key[$1,$2,$3]=1; lines[$1,$2,$3]=lines[$1,$2,$3] FS $0 }
-        END { for (k in key) print lines[k] }
-    ' "$1" "$2" "$3" | awk -F"\t" '!seen[$1,$2,$3]++'
+# Clean columns and remove empty rows
+clean_columns(){
+    continent_index=$(awk -F'\t' '{for(i=1;i<=NF;i++) if($i=="Continent") {print i; exit}}' "$1")
+    awk -F'\t' -v continent_index="$continent_index" 'BEGIN {OFS="\t"} {if (NR==1 || ($3>=2011 && $3<=2021)) {empty=0; for(i=1;i<=3;i++) 
+                if($i=="") {empty=1; break} if(empty==0) {printf $1$2$3 "\t";for(i=1;i<=NF;i++) if(i!=continent_index) 
+                printf "%s%s", $i, "\t"; print ""}}}' "$1" > "$2"
 }
 
-delete_columns(){
-    column_names=("Entity" "Code" "Year")
-    # 使用awk命令来删除单元格为空的行
-    awk -i inplace -F'\t' -v cols="${column_names[*]}" 'BEGIN {
-        split(cols, cols_arr, " ")
-    }
-    {
-        empty = 0
-        for (col in cols_arr) {
-            for (i=1; i<=NF; i++) {
-                if ($i == "" && $i == cols_arr[col]) {
-                    empty = 1
-                    break
-                }
-            }
-            if (empty) break
-        }
-        if (!empty) {
-            print
-        }
-    }' "$1"
+# Clean all files
+clean_file(){
+    clean_columns "$1" "$4"
+    clean_columns "$2" "$5"
+    clean_columns "$3" "$6"
 }
 
-# Output the first row name
-# echo -e "Entity/Country\tCode\tYear\tGDP per capita\tPopulation\tHomicide Rate\tLife Expectancy\tCantril Ladder score" > "test.tsv"
+# Merge files
+merge_file() {
+    output=$(mktemp)
+    awk 'BEGIN {FS="\t"; OFS="\t"} NR==FNR {a[$1]=$0; next} ($1 in a) && !seen[$1]++ {print a[$1], $0}' "$1" "$2" > "$output"
+    awk 'BEGIN {FS="\t"; OFS="\t"} NR==FNR {a[$1]=$0; next} ($1 in a) && !seen[$1]++ {print a[$1], $0}' "$output" "$3" > "$4"
+    rm "$output"
+}
+
+# Order columns
+order_columns() {
+    awk -F'\t' 'BEGIN {OFS="\t"} 
+    NR==1 { 
+        for (i=1; i<=NF; i++) { 
+            if ($i == "Entity") entity_index=i; 
+            if ($i == "Code") code_index=i; 
+            if ($i == "Year") year_index=i; 
+            if ($i == "\"GDP per capita, PPP (constant 2017 international $)\"") gdp_index=i; 
+            if ($i == "Population (historical estimates)") population_index=i; 
+            if ($i == "\"Homicide rate per 100,000 population - Both sexes - All ages\"") homicide_index=i; 
+            if ($i == "Life expectancy - Sex: all - Age: at birth - Variant: estimates") life_expectancy_index=i; 
+            if ($i == "Cantril ladder score") cantril_ladder_score_index=i; 
+        } 
+        print "Entity/Country", "Code", "Year", "GDP per capita", "Population", "Homicide Rate", "Life Expectancy", "Cantril Ladder score"
+    } NR > 1 { 
+        print $entity_index, $code_index, $year_index, $gdp_index, $population_index, $homicide_index, $life_expectancy_index, $cantril_ladder_score_index 
+        } ' "$1" > "$2"
+}
 
 # main function
 main() {
-    echo "1"
-    check_inconsistent_lines "$input_file1" "$input_file2" "$input_file3"
-    echo "2"
-    if ! check_tab_separator "$input_file1"; then
-        echo "File $input_file1 is not tab-separated."
-        exit 1
-    fi
-    echo "3"
     temp_output1=$(mktemp)
     temp_output2=$(mktemp)
+    temp_output3=$(mktemp)
     merged_output=$(mktemp)
-    # 清理第一份文件
-    continent_index=$(awk -F'\t' '{for(i=1;i<=NF;i++) if($i=="Continent") {print i; exit}}' "$input_file1")
-    awk -F'\t' -v continent_index="$continent_index" 'BEGIN {OFS="\t"} {if (NR==1 || ($3>=2011 && $3<=2021)) {empty=0; for(i=1;i<=3;i++) if($i=="") {empty=1; break} if(empty==0) {for(i=1;i<=NF;i++) if(i!=continent_index) printf "%s%s", $i, (i==NF?"\t":"\t"); print $1$2$3}}}' "$input_file1" > "$temp_output1"
-    # 清理第二份文件
-    continent_index=$(awk -F'\t' '{for(i=1;i<=NF;i++) if($i=="Continent") {print i; exit}}' "$input_file2")
-    awk -F'\t' -v continent_index="$continent_index" 'BEGIN {OFS="\t"} {if (NR==1 || ($3>=2011 && $3<=2021)) {empty=0; for(i=1;i<=3;i++) if($i=="") {empty=1; break} if(empty==0) {for(i=1;i<=NF;i++) if(i!=continent_index) printf "%s%s", $i, (i==NF?"\t":"\t"); print $1$2$3}}}' "$input_file2" > "$temp_output2"
-    # 合并两份文件
-    awk 'BEGIN {FS="\t"; OFS="\t"} NR==FNR {a[$NF]=$0; next} ($NF in a) && !seen[$NF]++ {print a[$NF], $0}' "$temp_output1" "$temp_output2" | awk -F'\t' 'NR==1 { for (i=1; i<=NF; i++) if (!seen[$i]++) printf "%s%s", $i, (i==NF?"\n":"\t"); print "" } NR>1 { for (i=1; i<=NF; i++) if (!seen[$i]) { seen[$i]=1; printf "%s%s", $i, (i==NF?"\n":"\t")} print "" }' > "$merged_output"
-    # awk 'BEGIN {FS="\t"; OFS="\t"} NR==FNR {a[$NF]=$0; next} ($NF in a) && !seen[$NF]++ {print a[$NF], $0}' compare.tsv compare2.tsv | awk -F'\t' 'NR==1 { for (i=1; i<=NF; i++) if (!seen[$i]++) printf "%s%s", $i, (i==NF?"\n":"\t"); print "" } NR>1 { for (i=1; i<=NF; i++) if (!seen[$i]) { seen[$i]=1; printf "%s%s", ($i == "" ? "\t" : $i), (i==NF?"\n":"\t")} print "" }' > m.tsv
-    # merge_files "$input_file1" "$input_file2" "$input_file3" >> test.tsv
-    # 现在只有前两个是合并成功的
-    # 检查所有列名为Entity、Code、Year的列，如果单元格为空则删除行.Year只保留2011到2021
-    # delete_columns test.tsv
-    # 排序
-    # order_columns test.tsv
+
+    check_file_exist "$1" "$2" "$3"
     
-    echo "4"
+    check_tab_separator "$1" "$2" "$3"
+    
+    check_inconsistent_lines "$1" "$2" "$3"
+    echo "x"      
+    # Clean files
+    clean_file "$1" "$2" "$3" "$temp_output1" "$temp_output2" "$temp_output3"
+    
+    # Merge files    
+    merge_file "$temp_output1" "$temp_output2" "$temp_output3" "$merged_output"
+
+    # Order columns
+    order_columns "$merged_output" "$4"
+    
+    # Delete the temporary file
+    rm "$temp_output1" "$temp_output2" "$temp_output3" "$merged_output"
 }
 
-main
+main "$1" "$2" "$3" "$4"
