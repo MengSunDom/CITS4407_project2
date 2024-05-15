@@ -97,7 +97,7 @@ main() {
     check_tab_separator "$1" "$2" "$3"
     
     check_inconsistent_lines "$1" "$2" "$3"
-    echo "x"      
+         
     # Clean files
     clean_file "$1" "$2" "$3" "$temp_output1" "$temp_output2" "$temp_output3"
     
