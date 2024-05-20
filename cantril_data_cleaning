@@ -90,8 +90,7 @@ main() {
     merged_output2=$(mktemp)
 
     check_file_exist "$1" "$2" "$3"
-    # 检查行数
-
+    
     check_tab_separator "$1" "$2" "$3"
     
     check_inconsistent_lines "$1" "$2" "$3"

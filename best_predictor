@@ -13,6 +13,10 @@ check_file_exist() {
             echo "Input file $file does not exist." >&2
             exit 1
         fi
+        if [[ $(wc -l < "$file") -eq 1 ]]; then
+            echo "The named input file $file has no valid data." >&2
+            exit 1
+        fi
     done
 }
 
@@ -167,8 +171,6 @@ main() {
 
     # Clean and prepare the columns
     clean_file "$1" "$clean_columns48" "$clean_columns58" "$clean_columns68" "$clean_columns78"
-
-    
 
     # Validate the cleaned files
     check_file_exist "$clean_columns48" "$clean_columns58" "$clean_columns68" "$clean_columns78"
