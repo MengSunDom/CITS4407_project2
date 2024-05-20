@@ -1,16 +1,20 @@
 #!/bin/bash
 
 # Input validation 
-if [ "$#" -ne 4 ]; then
-    echo "Usage: $0 <input_file1.tsv> <input_file2.tsv> <input_file3.tsv><output_file.tsv>"
+if [ "$#" -ne 3 ]; then
+    echo "Usage: cantril_data_cleaning <input_file1.tsv> <input_file2.tsv> <input_file3.tsv>" >&2
     exit 1
 fi
 
 # Check if the file exist
 check_file_exist() {
     for file in "$@"; do
-        if [ ! -f "$file" ]; then
-            echo "Input file $file does not exist."
+        if [[ ! -f "$file" || $(wc -l < "$file") -eq 0 ]]; then
+            echo "The named input file $file does not exist or has zero length." >&2
+            exit 1
+        fi
+        if [[ $(wc -l < "$file") -eq 1 ]]; then
+            echo "The named input file $file has no valid data." >&2
             exit 1
         fi
     done
@@ -21,7 +25,7 @@ check_tab_separator() {
     for file in "$@"; do
         first_line=$(head -n 1 "$file")
         if [[ "$first_line" != *$'\t'* ]]; then
-            echo "File $file is not tab-separated."
+            echo "File $file is not tab-separated." >&2
             exit 1
         fi
     done
@@ -30,15 +34,7 @@ check_tab_separator() {
 # Check rows with different number of cells but allow cells to be empty
 check_inconsistent_lines() {
     for file in "$@"; do
-        first_line=$(head -n 1 "$file")
-        expected_tabs=$(echo -e "$first_line" | awk -F'\t' '{print NF}')
-        while IFS=$'\t' read -r line; do
-            num_tabs=$(echo -e "$line" | awk -F'\t' '{print NF}')
-            if [ "$num_tabs" -ne "$expected_tabs" ]; then
-                echo "Inconsistent line in file $file: $line"
-                exit 1
-            fi
-        done < "$file"
+        awk -F '\t' 'NR == 1 { num_tabs = NF } NF != num_tabs { print "Inconsistent line in file " FILENAME " at line " NR ": " $0;exit 1}' "$file"
     done
 }
 
@@ -91,13 +87,15 @@ main() {
     temp_output2=$(mktemp)
     temp_output3=$(mktemp)
     merged_output=$(mktemp)
+    merged_output2=$(mktemp)
 
     check_file_exist "$1" "$2" "$3"
-    
+    # 检查行数
+
     check_tab_separator "$1" "$2" "$3"
     
     check_inconsistent_lines "$1" "$2" "$3"
-         
+          
     # Clean files
     clean_file "$1" "$2" "$3" "$temp_output1" "$temp_output2" "$temp_output3"
     
@@ -105,10 +103,13 @@ main() {
     merge_file "$temp_output1" "$temp_output2" "$temp_output3" "$merged_output"
 
     # Order columns
-    order_columns "$merged_output" "$4"
+    order_columns "$merged_output" "$merged_output2"
+
+    # print results
+    cat "$merged_output2"
     
     # Delete the temporary file
-    rm "$temp_output1" "$temp_output2" "$temp_output3" "$merged_output"
+    rm "$temp_output1" "$temp_output2" "$temp_output3" "$merged_output" "$merged_output2"
 }
 
-main "$1" "$2" "$3" "$4"
+main "$1" "$2" "$3"
